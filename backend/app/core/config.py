@@ -28,12 +28,25 @@ class Settings(BaseSettings):
     llm_default_provider: Literal["mock", "ollama", "gemini"] = "mock"
     llm_fallback_providers: str = "ollama,gemini,mock"
     llm_redact_pii_for_cloud: bool = True
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_default_model: str = "llama-3.1-8b-instruct"
+    gemini_api_key: str = ""
+    gemini_default_model: str = "gemini-2.5-flash"
 
     auth_secret_key: str = _DEFAULT_DEV_SECRET
+    vault_encryption_key: str = ""
 
     @property
     def cors_origin_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
+    @property
+    def fallback_provider_list(self) -> list[str]:
+        return [
+            provider.strip().lower()
+            for provider in self.llm_fallback_providers.split(",")
+            if provider.strip()
+        ]
 
 
 @lru_cache(maxsize=1)
