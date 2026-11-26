@@ -73,6 +73,18 @@ async def propose_merge(
         f"{request.rationale}. Source IDs: {', '.join(record_ids)} -> "
         f"golden ID: {request.golden_record.get(request.id_field, record_ids[0])}."
     )
+    payload_data: dict[str, object] = {
+        "cluster_id": request.cluster_id,
+        "record_ids": record_ids,
+        "id_field": request.id_field,
+        "golden_record": request.golden_record,
+        "rationale": request.rationale,
+    }
+    if request.connector_id:
+        payload_data["connector_id"] = request.connector_id
+    if request.target_table:
+        payload_data["target_table"] = request.target_table
+
     return await create_proposal(
         session,
         domain="dedup",
@@ -80,12 +92,7 @@ async def propose_merge(
         title=title,
         summary=summary,
         risk_level="high",
-        payload={
-            "cluster_id": request.cluster_id,
-            "record_ids": record_ids,
-            "golden_record": request.golden_record,
-            "rationale": request.rationale,
-        },
+        payload=payload_data,
         before_snapshot=request.source_records,
         created_by=request.created_by,
     )

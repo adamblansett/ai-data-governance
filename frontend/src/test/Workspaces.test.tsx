@@ -7,7 +7,18 @@ import type { GovernanceProposal } from '../types/governance';
 function jsonResponse(payload: unknown) {
   return {
     ok: true,
+    status: 200,
     json: async () => payload,
+    text: async () => JSON.stringify(payload),
+  };
+}
+
+function textResponse(body: string) {
+  return {
+    ok: true,
+    status: 200,
+    text: async () => body,
+    json: async () => ({}),
   };
 }
 
@@ -16,7 +27,7 @@ describe('Governance interactive workspaces', () => {
     vi.unstubAllGlobals();
   });
 
-  it('supports PII scan/mask, Dedup propose merge, Normalizers, Schema Audit, and HITL approvals', async () => {
+  it('supports JWT role switching, CSV ingest, connectors/jobs, compliance export, and HITL approvals', async () => {
     const user = userEvent.setup();
     const proposalsStore: GovernanceProposal[] = [
       {
@@ -27,7 +38,11 @@ describe('Governance interactive workspaces', () => {
         summary: 'Verified match',
         status: 'pending_review',
         risk_level: 'high',
-        payload: { cluster_id: 'cluster-1', record_ids: ['crm-101', 'crm-102'], golden_record: { id: 'crm-102' } },
+        payload: {
+          cluster_id: 'cluster-1',
+          record_ids: ['crm-101', 'crm-102'],
+          golden_record: { id: 'crm-102' },
+        },
         before_snapshot: [{ id: 'crm-101' }, { id: 'crm-102' }],
         after_snapshot: {},
         created_by: 'dedup-agent',
@@ -37,6 +52,22 @@ describe('Governance interactive workspaces', () => {
         reviewed_at: null,
         applied_at: null,
         rolled_back_at: null,
+      },
+    ];
+
+    const jobsStore = [
+      {
+        id: 'job-1',
+        job_type: 'pii_scan',
+        status: 'completed',
+        execution_mode: 'inline',
+        created_by: 'ui-steward',
+        params: { text: 'alice@acme.com' },
+        result: { total_findings: 1 },
+        error_message: null,
+        created_at: '2026-11-26T07:00:00Z',
+        started_at: '2026-11-26T07:00:00Z',
+        completed_at: '2026-11-26T07:00:01Z',
       },
     ];
 
@@ -50,6 +81,15 @@ describe('Governance interactive workspaces', () => {
           version: '0.1.0',
           environment: 'test',
           llm_provider: 'mock',
+        });
+      }
+      if (url === '/api/v1/auth/token') {
+        return jsonResponse({
+          access_token: 'jwt-steward-token',
+          token_type: 'bearer',
+          sub: 'ui-steward',
+          role: 'steward',
+          expires_at: '2026-11-26T20:00:00Z',
         });
       }
       if (url === '/api/v1/pii/vault/stats') {
@@ -94,6 +134,15 @@ describe('Governance interactive workspaces', () => {
           tokens_created: ['TOK_EMAIL_ABC123'],
           risk_score: 12.0,
           risk_level: 'low',
+        });
+      }
+      if (url === '/api/v1/connectors/ingest/file') {
+        return jsonResponse({
+          filename: 'sample.csv',
+          format: 'csv',
+          row_count: 1,
+          columns: ['id', 'email'],
+          records: [{ id: '99', email: 'csv@acme.com' }],
         });
       }
       if (url === '/api/v1/dedup/analyze') {
@@ -170,11 +219,49 @@ describe('Governance interactive workspaces', () => {
           ],
         });
       }
+      if (url === '/api/v1/connectors' && (!init?.method || init.method === 'GET')) {
+        return jsonResponse([
+          {
+            id: 'conn-1',
+            name: 'local-warehouse',
+            connector_type: 'sqlite',
+            dsn_masked: 'sqlite:///./warehouse.db',
+            read_only: true,
+            description: 'Warehouse DB',
+            created_by: 'admin',
+            created_at: '2026-11-26T07:00:00Z',
+          },
+        ]);
+      }
+      if (url === '/api/v1/connectors/conn-1/audit') {
+        return jsonResponse({
+          tables_analyzed: 2,
+          health_score: 82.0,
+          findings_count: 1,
+          findings_by_severity: { medium: 1 },
+          findings: [],
+          ai_summary: 'Live audit complete.',
+          llm_provider: 'mock',
+        });
+      }
+      if (url === '/api/v1/jobs' && (!init?.method || init.method === 'GET')) {
+        return jsonResponse(jobsStore);
+      }
+      if (url === '/api/v1/jobs/submit') {
+        return jsonResponse(jobsStore[0]);
+      }
+      if (url.startsWith('/api/v1/reports/compliance?format=markdown')) {
+        return textResponse('# AI Data Governance Compliance Report\n- Audit Chain Integrity: VALID');
+      }
       if (url.startsWith('/api/v1/governance/proposals') && (!init?.method || init.method === 'GET')) {
         return jsonResponse(proposalsStore);
       }
       if (url === '/api/v1/governance/proposals/prop-1/approve') {
-        proposalsStore[0] = { ...proposalsStore[0], status: 'approved', reviewed_by: 'data-steward' };
+        proposalsStore[0] = {
+          ...proposalsStore[0],
+          status: 'approved',
+          reviewed_by: 'ui-steward',
+        };
         return jsonResponse(proposalsStore[0]);
       }
       if (url === '/api/v1/governance/proposals/prop-1/apply') {
@@ -218,8 +305,20 @@ describe('Governance interactive workspaces', () => {
       expect(screen.getByText(/API Healthy \(mock\)/i)).toBeInTheDocument();
     });
 
-    // 1. PII Workspace
+    // Switch JWT Session Role
+    await user.selectOptions(screen.getByLabelText(/Session Role/i), 'steward');
+    expect(await screen.findByText(/Switched JWT session to ui-steward/i)).toBeInTheDocument();
+
+    // 1. PII Workspace + CSV upload
     await user.click(screen.getByRole('button', { name: /PII & Vault/i }));
+    const fileInput = screen.getByLabelText(/Upload CSV\/JSON/i) as HTMLInputElement;
+    const csvFile = new File(['id,email\n99,csv@acme.com\n'], 'sample.csv', { type: 'text/csv' });
+    await user.upload(fileInput, csvFile);
+    await waitFor(() => {
+      expect((screen.getByLabelText(/Structured Records/i) as HTMLTextAreaElement).value).toContain(
+        'csv@acme.com',
+      );
+    });
     await user.click(screen.getByRole('button', { name: /Scan PII/i }));
     expect(await screen.findByText('el***@northwind.io')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /Apply Strategy/i }));
@@ -242,13 +341,23 @@ describe('Governance interactive workspaces', () => {
     await user.click(screen.getByRole('button', { name: /Run Schema Audit/i }));
     expect(await screen.findByText(/48 \/ 100/i)).toBeInTheDocument();
 
-    // 5. Governance Approvals & Audit Chain
+    // 5. Connectors & Jobs Workspace
+    await user.click(screen.getByRole('button', { name: /Connectors & Jobs/i }));
+    expect(await screen.findByText('local-warehouse')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Run Live Audit/i }));
+    expect(await screen.findByText(/Live Schema Audit — Health Score 82\/100/i)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Submit Job/i }));
+    expect(await screen.findByText('ui-steward')).toBeInTheDocument();
+
+    // 6. Governance Approvals, Compliance Export & Audit Chain
     await user.click(screen.getByRole('button', { name: /Approvals & Audit/i }));
     expect(await screen.findByText('Merge 2 duplicate records (cluster-1)')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /^Approve$/i }));
     await user.click(await screen.findByRole('button', { name: /Apply Change/i }));
     await user.click(await screen.findByRole('button', { name: /Rollback/i }));
     expect(await screen.findByText('rolled_back')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Export Markdown/i }));
+    expect(await screen.findByText(/# AI Data Governance Compliance Report/i)).toBeInTheDocument();
     expect(screen.getByText(/Hash chain verified across 4 event\(s\)/i)).toBeInTheDocument();
   });
 });

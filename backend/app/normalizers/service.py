@@ -63,6 +63,18 @@ async def propose_normalization(
         f"{len(request.rules)} rules ({invalid_cells} validation warnings)."
     )
 
+    payload_data: dict[str, object] = {
+        "rules": [rule.model_dump() for rule in request.rules],
+        "id_field": request.id_field,
+        "changes_count": changed_cells,
+        "invalid_cells": invalid_cells,
+        "normalized_records": normalized_records,
+    }
+    if request.connector_id:
+        payload_data["connector_id"] = request.connector_id
+    if request.target_table:
+        payload_data["target_table"] = request.target_table
+
     return await create_proposal(
         session,
         domain="normalizers",
@@ -70,12 +82,7 @@ async def propose_normalization(
         title=request.title,
         summary=summary,
         risk_level="medium",
-        payload={
-            "rules": [rule.model_dump() for rule in request.rules],
-            "changes_count": changed_cells,
-            "invalid_cells": invalid_cells,
-            "normalized_records": normalized_records,
-        },
+        payload=payload_data,
         before_snapshot=request.records,
         created_by=request.created_by,
     )

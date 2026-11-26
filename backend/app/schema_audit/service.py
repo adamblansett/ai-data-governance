@@ -76,6 +76,13 @@ async def propose_remediation(
         f"Stage {len(statements)} SQL remediation statements across tables: {', '.join(tables)}."
     )
 
+    payload_data: dict[str, object] = {
+        "statements": statements,
+        "tables": tables,
+    }
+    if request.connector_id:
+        payload_data["connector_id"] = request.connector_id
+
     return await create_proposal(
         session,
         domain="schema_audit",
@@ -83,10 +90,7 @@ async def propose_remediation(
         title=request.title,
         summary=summary,
         risk_level="high",
-        payload={
-            "statements": statements,
-            "tables": tables,
-        },
+        payload=payload_data,
         before_snapshot=[f.model_dump() for f in request.findings],
         created_by=request.created_by,
     )

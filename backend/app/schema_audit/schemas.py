@@ -108,3 +108,4 @@ class ProposeRemediationRequest(BaseModel):
         max_length=200,
     )
     created_by: str = Field(default="schema-auditor", min_length=1, max_length=120)
+    connector_id: str | None = None

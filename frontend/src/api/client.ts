@@ -1,42 +1,77 @@
 import type {
   AuditChainVerification,
   AuditEvent,
+  AuthTokenResponse,
+  BackgroundJob,
+  ComplianceReport,
+  ConnectorSampleResponse,
+  ConnectorTableMeta,
+  ConnectorTestResponse,
+  ConnectorType,
+  DataConnector,
   DedupAnalyzeResponse,
   FieldRule,
+  FileIngestResponse,
   GovernanceProposal,
   HealthStatus,
+  JobMode,
+  JobType,
   MaskStrategy,
   NormalizerPreviewResponse,
   PiiDetokenizeResponse,
   PiiMaskResponse,
   PiiScanResponse,
   PiiVaultStatsResponse,
+  Role,
   SchemaAuditResponse,
   SchemaFinding,
   SurvivorshipRule,
+  WhoAmIResponse,
 } from '../types/governance';
+
+let activeAuthToken: string | null = null;
+
+export function setAuthToken(token: string | null): void {
+  activeAuthToken = token;
+}
+
+export function getAuthToken(): string | null {
+  return activeAuthToken;
+}
+
+function authHeaders(): Record<string, string> {
+  return activeAuthToken ? { Authorization: `Bearer ${activeAuthToken}` } : {};
+}
+
+async function parseErrorMessage(response: Response): Promise<string> {
+  let message = `Request failed (${response.status})`;
+  try {
+    const errBody = (await response.json()) as { detail?: unknown };
+    if (typeof errBody.detail === 'string') {
+      message = errBody.detail;
+    } else if (Array.isArray(errBody.detail) && errBody.detail.length > 0) {
+      message = JSON.stringify(errBody.detail);
+    }
+  } catch {
+    // Ignore parse failures on non-JSON error responses.
+  }
+  return message;
+}
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
+      ...authHeaders(),
       ...(init?.headers ?? {}),
     },
   });
   if (!response.ok) {
-    let message = `Request failed (${response.status})`;
-    try {
-      const errBody = (await response.json()) as { detail?: unknown };
-      if (typeof errBody.detail === 'string') {
-        message = errBody.detail;
-      } else if (Array.isArray(errBody.detail) && errBody.detail.length > 0) {
-        message = JSON.stringify(errBody.detail);
-      }
-    } catch {
-      // Ignore parse failures on non-JSON error responses.
-    }
-    throw new Error(message);
+    throw new Error(await parseErrorMessage(response));
+  }
+  if (response.status === 204) {
+    return undefined as T;
   }
   return (await response.json()) as T;
 }
@@ -47,6 +82,21 @@ export async function fetchHealth(): Promise<HealthStatus> {
     throw new Error(`Health check failed (${response.status})`);
   }
   return (await response.json()) as HealthStatus;
+}
+
+export function issueAuthToken(payload: {
+  username: string;
+  role: Role;
+  api_key?: string;
+}): Promise<AuthTokenResponse> {
+  return requestJson<AuthTokenResponse>('/api/v1/auth/token', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchWhoAmI(): Promise<WhoAmIResponse> {
+  return requestJson<WhoAmIResponse>('/api/v1/auth/me');
 }
 
 export function scanPii(payload: {
@@ -205,4 +255,114 @@ export function fetchAuditEvents(limit = 50): Promise<AuditEvent[]> {
 
 export function verifyAuditChain(): Promise<AuditChainVerification> {
   return requestJson<AuditChainVerification>('/api/v1/governance/audit/verify');
+}
+
+export function fetchConnectors(): Promise<DataConnector[]> {
+  return requestJson<DataConnector[]>('/api/v1/connectors');
+}
+
+export function createConnector(payload: {
+  name: string;
+  connector_type: ConnectorType;
+  dsn: string;
+  read_only: boolean;
+  description: string;
+}): Promise<DataConnector> {
+  return requestJson<DataConnector>('/api/v1/connectors', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function deleteConnector(connectorId: string): Promise<void> {
+  return requestJson<void>(`/api/v1/connectors/${connectorId}`, {
+    method: 'DELETE',
+  });
+}
+
+export function testConnector(connectorId: string): Promise<ConnectorTestResponse> {
+  return requestJson<ConnectorTestResponse>(`/api/v1/connectors/${connectorId}/test`, {
+    method: 'POST',
+  });
+}
+
+export function introspectConnectorTables(connectorId: string): Promise<ConnectorTableMeta[]> {
+  return requestJson<ConnectorTableMeta[]>(`/api/v1/connectors/${connectorId}/tables`);
+}
+
+export function sampleConnectorTable(
+  connectorId: string,
+  tableName: string,
+  limit = 25,
+): Promise<ConnectorSampleResponse> {
+  return requestJson<ConnectorSampleResponse>(
+    `/api/v1/connectors/${connectorId}/tables/${encodeURIComponent(tableName)}/sample?limit=${limit}`,
+  );
+}
+
+export function auditConnector(connectorId: string): Promise<SchemaAuditResponse> {
+  return requestJson<SchemaAuditResponse>(`/api/v1/connectors/${connectorId}/audit`, {
+    method: 'POST',
+    body: JSON.stringify({ default_retention_days: 365 }),
+  });
+}
+
+export function scanConnectorTablePii(
+  connectorId: string,
+  tableName: string,
+): Promise<PiiScanResponse> {
+  return requestJson<PiiScanResponse>(
+    `/api/v1/connectors/${connectorId}/tables/${encodeURIComponent(tableName)}/pii-scan`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ limit: 100, include_ner: true }),
+    },
+  );
+}
+
+export async function uploadIngestFile(file: File): Promise<FileIngestResponse> {
+  const form = new FormData();
+  form.append('file', file);
+  const response = await fetch('/api/v1/connectors/ingest/file', {
+    method: 'POST',
+    headers: {
+      ...authHeaders(),
+    },
+    body: form,
+  });
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response));
+  }
+  return (await response.json()) as FileIngestResponse;
+}
+
+export function submitJob(payload: {
+  job_type: JobType;
+  execution_mode: JobMode;
+  params: Record<string, unknown>;
+}): Promise<BackgroundJob> {
+  return requestJson<BackgroundJob>('/api/v1/jobs/submit', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function fetchJobs(): Promise<BackgroundJob[]> {
+  return requestJson<BackgroundJob[]>('/api/v1/jobs');
+}
+
+export function fetchComplianceReport(): Promise<ComplianceReport> {
+  return requestJson<ComplianceReport>('/api/v1/reports/compliance?format=json');
+}
+
+export async function downloadComplianceReport(format: 'markdown' | 'csv'): Promise<string> {
+  const response = await fetch(`/api/v1/reports/compliance?format=${format}`, {
+    headers: {
+      ...authHeaders(),
+    },
+  });
+  if (!response.ok) {
+    throw new Error(await parseErrorMessage(response));
+  }
+  return await response.text();
 }

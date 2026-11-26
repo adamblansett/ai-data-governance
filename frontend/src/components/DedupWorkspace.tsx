@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Check, GitMerge, Sparkles } from 'lucide-react';
-import { analyzeDedup, proposeDedupMerge } from '../api/client';
+import { Check, GitMerge, Sparkles, Upload } from 'lucide-react';
+import { analyzeDedup, proposeDedupMerge, uploadIngestFile } from '../api/client';
 import { SAMPLE_DEDUP_RECORDS } from '../data/samples';
 import type {
   DedupAnalyzeResponse,
@@ -64,6 +64,20 @@ export default function DedupWorkspace({ onProposalCreated }: DedupWorkspaceProp
     }
   }
 
+  async function handleFileUpload(file: File | undefined) {
+    if (!file) return;
+    setError(null);
+    setLoading(true);
+    try {
+      const ingested = await uploadIngestFile(file);
+      setRecordsJson(JSON.stringify(ingested.records, null, 2));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'File upload failed');
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -77,13 +91,25 @@ export default function DedupWorkspace({ onProposalCreated }: DedupWorkspaceProp
               preview golden records with field provenance, and queue human-reviewed merges.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => setRecordsJson(JSON.stringify(SAMPLE_DEDUP_RECORDS, null, 2))}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-          >
-            Load Sample
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setRecordsJson(JSON.stringify(SAMPLE_DEDUP_RECORDS, null, 2))}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Load Sample
+            </button>
+            <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
+              <Upload className="h-3.5 w-3.5" />
+              Upload CSV/JSON
+              <input
+                type="file"
+                accept=".csv,.json"
+                className="hidden"
+                onChange={(e) => void handleFileUpload(e.target.files?.[0])}
+              />
+            </label>
+          </div>
         </div>
 
         <div className="mt-4">

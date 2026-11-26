@@ -1,12 +1,15 @@
 import hashlib
 import json
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.models import AuditEvent, GovernanceProposal
+from app.db.models import AuditEvent, DataConnector, GovernanceProposal
+
+if TYPE_CHECKING:
+    from app.connectors.crypto import DsnCipher
 from app.governance.schemas import (
     AuditChainVerificationResponse,
     AuditEventResponse,
@@ -283,12 +286,17 @@ async def approve_proposal(
     *,
     reviewer: str,
     notes: str = "",
+    enforce_four_eyes: bool = True,
 ) -> GovernanceProposal:
-    """Transition a pending_review proposal to approved."""
+    """Transition a pending_review proposal to approved (enforcing four-eyes separation)."""
     proposal = await _load_proposal(session, proposal_id)
     if proposal.status != "pending_review":
         raise ProposalStateError(
             f"Cannot approve proposal in state '{proposal.status}'; expected 'pending_review'."
+        )
+    if enforce_four_eyes and proposal.created_by.strip().lower() == reviewer.strip().lower():
+        raise ProposalStateError(
+            "Separation of duties violation: proposal creator cannot approve their own proposal."
         )
 
     proposal.status = "approved"
@@ -365,13 +373,30 @@ def _build_after_snapshot(
     return base
 
 
+async def _load_writable_connector_dsn(
+    session: AsyncSession,
+    connector_id: str,
+    dsn_cipher: "DsnCipher",
+) -> str:
+    res = await session.execute(select(DataConnector).where(DataConnector.id == connector_id))
+    connector = res.scalar_one_or_none()
+    if connector is None:
+        raise ProposalStateError(f"Target connector '{connector_id}' no longer exists.")
+    if connector.read_only:
+        raise ProposalStateError(
+            f"Connector '{connector.name}' is read-only; live write execution is blocked."
+        )
+    return dsn_cipher.decrypt(connector.dsn_encrypted)
+
+
 async def apply_proposal(
     session: AsyncSession,
     proposal_id: str,
     *,
     actor: str,
+    dsn_cipher: "DsnCipher | None" = None,
 ) -> GovernanceProposal:
-    """Apply an approved HITL proposal and compute its after-state snapshot."""
+    """Apply an approved HITL proposal (optionally executing against a live connector)."""
     proposal = await _load_proposal(session, proposal_id)
     if proposal.status != "approved":
         raise ProposalStateError(
@@ -380,7 +405,27 @@ async def apply_proposal(
 
     applied_at = datetime.now(UTC)
     payload = _safe_json_loads(proposal.payload_json, {})
+    before_snapshot = _safe_json_loads(proposal.before_snapshot_json, {})
     after_snapshot = _build_after_snapshot(proposal, payload, actor, applied_at)
+
+    connector_id = payload.get("connector_id")
+    if isinstance(connector_id, str) and connector_id.strip():
+        if dsn_cipher is None:
+            raise ProposalStateError("Connector cipher required for live connector execution.")
+        from app.connectors.executor import apply_proposal_to_connector
+
+        dsn = await _load_writable_connector_dsn(session, connector_id, dsn_cipher)
+        try:
+            captured_before, exec_summary = await apply_proposal_to_connector(
+                dsn,
+                action_type=proposal.action_type,
+                payload=payload,
+                before_snapshot=before_snapshot,
+            )
+        except ValueError as exc:
+            raise ProposalStateError(str(exc)) from exc
+        proposal.before_snapshot_json = json.dumps(captured_before, default=str)
+        after_snapshot.update(exec_summary)
 
     proposal.after_snapshot_json = json.dumps(after_snapshot, default=str)
     proposal.status = "applied"
@@ -393,7 +438,10 @@ async def apply_proposal(
         action="proposal.applied",
         actor=actor,
         resource_id=proposal.id,
-        details={"action_type": proposal.action_type},
+        details={
+            "action_type": proposal.action_type,
+            "executed_on_connector": bool(after_snapshot.get("executed_on_connector")),
+        },
     )
     return proposal
 
@@ -404,13 +452,38 @@ async def rollback_proposal(
     *,
     actor: str,
     reason: str,
+    dsn_cipher: "DsnCipher | None" = None,
 ) -> GovernanceProposal:
-    """Roll back an applied proposal while preserving the original before snapshot."""
+    """Roll back an applied proposal, restoring live connector rows when applicable."""
     proposal = await _load_proposal(session, proposal_id)
     if proposal.status != "applied":
         raise ProposalStateError(
             f"Cannot rollback proposal in state '{proposal.status}'; expected 'applied'."
         )
+
+    payload = _safe_json_loads(proposal.payload_json, {})
+    before_snapshot = _safe_json_loads(proposal.before_snapshot_json, {})
+    rollback_meta: dict[str, Any] = {
+        "action_type": proposal.action_type,
+        "reason": reason,
+        "restored_from_before_snapshot": True,
+    }
+
+    connector_id = payload.get("connector_id")
+    if isinstance(connector_id, str) and connector_id.strip() and dsn_cipher is not None:
+        from app.connectors.executor import rollback_proposal_on_connector
+
+        dsn = await _load_writable_connector_dsn(session, connector_id, dsn_cipher)
+        try:
+            rb_result = await rollback_proposal_on_connector(
+                dsn,
+                action_type=proposal.action_type,
+                payload=payload,
+                before_snapshot=before_snapshot,
+            )
+        except ValueError as exc:
+            raise ProposalStateError(str(exc)) from exc
+        rollback_meta.update(rb_result)
 
     proposal.status = "rolled_back"
     proposal.rolled_back_at = datetime.now(UTC)
@@ -422,11 +495,7 @@ async def rollback_proposal(
         action="proposal.rolled_back",
         actor=actor,
         resource_id=proposal.id,
-        details={
-            "action_type": proposal.action_type,
-            "reason": reason,
-            "restored_from_before_snapshot": True,
-        },
+        details=rollback_meta,
     )
     return proposal
 

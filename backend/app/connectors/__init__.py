@@ -1,0 +1,65 @@
+from app.connectors.crypto import DsnCipher, normalize_async_dsn, redact_dsn
+from app.connectors.executor import (
+    apply_proposal_to_connector,
+    rollback_proposal_on_connector,
+)
+from app.connectors.ingest import parse_uploaded_file
+from app.connectors.inspector import introspect_tables, sample_table_rows, test_connection
+from app.connectors.schemas import (
+    ConnectorAuditRequest,
+    ConnectorCreateRequest,
+    ConnectorDedupRequest,
+    ConnectorPiiScanRequest,
+    ConnectorResponse,
+    ConnectorSampleResponse,
+    ConnectorTestResponse,
+    ConnectorType,
+    FileIngestResponse,
+)
+from app.connectors.service import (
+    ConnectorConflictError,
+    ConnectorNotFoundError,
+    audit_connector_schema,
+    create_connector,
+    dedup_connector_table,
+    delete_connector,
+    introspect_connector_tables,
+    list_connectors,
+    sample_connector_table,
+    scan_connector_table_pii,
+    serialize_connector,
+    test_connector,
+)
+
+__all__ = [
+    "ConnectorAuditRequest",
+    "ConnectorConflictError",
+    "ConnectorCreateRequest",
+    "ConnectorDedupRequest",
+    "ConnectorNotFoundError",
+    "ConnectorPiiScanRequest",
+    "ConnectorResponse",
+    "ConnectorSampleResponse",
+    "ConnectorTestResponse",
+    "ConnectorType",
+    "DsnCipher",
+    "FileIngestResponse",
+    "apply_proposal_to_connector",
+    "audit_connector_schema",
+    "create_connector",
+    "dedup_connector_table",
+    "delete_connector",
+    "introspect_connector_tables",
+    "introspect_tables",
+    "list_connectors",
+    "normalize_async_dsn",
+    "parse_uploaded_file",
+    "redact_dsn",
+    "rollback_proposal_on_connector",
+    "sample_connector_table",
+    "sample_table_rows",
+    "scan_connector_table_pii",
+    "serialize_connector",
+    "test_connection",
+    "test_connector",
+]

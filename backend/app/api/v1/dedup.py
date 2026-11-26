@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import Principal, require_role, resolve_actor
 from app.db.session import get_app_settings, get_db_session
 from app.dedup.schemas import (
     DedupAnalyzeRequest,
@@ -29,6 +30,7 @@ def _get_llm_router(request: Request) -> LLMRouter:
 async def analyze_duplicates_endpoint(
     payload: DedupAnalyzeRequest,
     request: Request,
+    _: Principal = Depends(require_role("analyst")),
     session: AsyncSession = Depends(get_db_session),
 ) -> DedupAnalyzeResponse:
     """Cluster fuzzy duplicate records and compute golden-record survivorship."""
@@ -39,8 +41,12 @@ async def analyze_duplicates_endpoint(
 @router.post("/propose-merge", response_model=GovernanceProposalResponse)
 async def propose_merge_endpoint(
     payload: ProposeMergeRequest,
+    principal: Principal = Depends(require_role("analyst")),
     session: AsyncSession = Depends(get_db_session),
 ) -> GovernanceProposalResponse:
     """Queue a human-in-the-loop merge proposal with full before-snapshot."""
-    proposal = await propose_merge(session, payload)
+    updated_payload = payload.model_copy(
+        update={"created_by": resolve_actor(principal, payload.created_by)}
+    )
+    proposal = await propose_merge(session, updated_payload)
     return serialize_proposal(proposal)

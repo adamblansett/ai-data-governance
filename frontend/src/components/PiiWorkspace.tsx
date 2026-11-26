@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { KeyRound, Lock, ScanSearch, Unlock } from 'lucide-react';
-import { detokenizePii, maskPii, scanPii } from '../api/client';
+import { KeyRound, Lock, ScanSearch, Unlock, Upload } from 'lucide-react';
+import { detokenizePii, maskPii, scanPii, uploadIngestFile } from '../api/client';
 import { SAMPLE_PII_RECORDS, SAMPLE_PII_TEXT } from '../data/samples';
 import type {
   MaskStrategy,
@@ -110,6 +110,21 @@ export default function PiiWorkspace({ onVaultChanged }: PiiWorkspaceProps) {
     }
   }
 
+  async function handleFileUpload(file: File | undefined) {
+    if (!file) return;
+    setError(null);
+    setLoading(true);
+    try {
+      const ingested = await uploadIngestFile(file);
+      setMode('records');
+      setRecordsInput(JSON.stringify(ingested.records, null, 2));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'File upload failed');
+    } finally {
+      setLoading(false);
+    }
+  }
+
   const findings: PiiEntityMatch[] = maskResult?.findings ?? scanResult?.findings ?? [];
   const riskScore = maskResult?.risk_score ?? scanResult?.risk_score;
   const riskLevel = maskResult?.risk_level ?? scanResult?.risk_level;
@@ -160,6 +175,16 @@ export default function PiiWorkspace({ onVaultChanged }: PiiWorkspaceProps) {
             >
               Load Sample
             </button>
+            <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
+              <Upload className="h-3.5 w-3.5" />
+              Upload CSV/JSON
+              <input
+                type="file"
+                accept=".csv,.json"
+                className="hidden"
+                onChange={(e) => void handleFileUpload(e.target.files?.[0])}
+              />
+            </label>
           </div>
         </div>
 

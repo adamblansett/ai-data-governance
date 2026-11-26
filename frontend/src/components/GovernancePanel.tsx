@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   CheckCircle2,
+  Download,
   Play,
   RefreshCw,
   RotateCcw,
@@ -11,6 +12,7 @@ import {
 import {
   applyProposal,
   approveProposal,
+  downloadComplianceReport,
   fetchAuditEvents,
   fetchProposals,
   rejectProposal,
@@ -35,6 +37,9 @@ export default function GovernancePanel({ onDataChanged }: GovernancePanelProps)
   const [reviewer, setReviewer] = useState('data-steward');
   const [notes, setNotes] = useState('Reviewed via governance dashboard');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [exportedReport, setExportedReport] = useState<{ format: string; content: string } | null>(
+    null,
+  );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -85,6 +90,19 @@ export default function GovernancePanel({ onDataChanged }: GovernancePanelProps)
       setVerification(res);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Audit chain verification failed');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleExport(format: 'markdown' | 'csv') {
+    setError(null);
+    setLoading(true);
+    try {
+      const content = await downloadComplianceReport(format);
+      setExportedReport({ format, content });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Report export failed');
     } finally {
       setLoading(false);
     }
@@ -311,16 +329,42 @@ export default function GovernancePanel({ onDataChanged }: GovernancePanelProps)
               linked via SHA-256 without storing raw PII.
             </p>
           </div>
-          <button
-            type="button"
-            disabled={loading}
-            onClick={() => void handleVerifyChain()}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white hover:bg-slate-800"
-          >
-            <ShieldCheck className="h-3.5 w-3.5" />
-            Verify Hash Chain
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => void handleExport('markdown')}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              <Download className="h-3.5 w-3.5" />
+              Export Markdown
+            </button>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => void handleExport('csv')}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              <Download className="h-3.5 w-3.5" />
+              Export CSV
+            </button>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={() => void handleVerifyChain()}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3.5 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+            >
+              <ShieldCheck className="h-3.5 w-3.5" />
+              Verify Hash Chain
+            </button>
+          </div>
         </div>
+
+        {exportedReport && (
+          <pre className="mt-3 max-h-48 overflow-auto rounded-lg border border-slate-200 bg-slate-50 p-3 font-mono text-[11px] text-slate-800">
+            {exportedReport.content}
+          </pre>
+        )}
 
         {verification && (
           <div

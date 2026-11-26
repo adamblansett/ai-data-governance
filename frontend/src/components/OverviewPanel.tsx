@@ -59,6 +59,14 @@ const CAPABILITIES: {
     icon: Database,
     accent: 'text-sky-600 bg-sky-50',
   },
+  {
+    tab: 'connectors',
+    title: 'Live Connectors & Jobs',
+    summary:
+      'Encrypted PostgreSQL/SQLite connectors, live table profiling, CSV/JSON upload, and async jobs.',
+    icon: Cpu,
+    accent: 'text-purple-600 bg-purple-50',
+  },
 ];
 
 export default function OverviewPanel({

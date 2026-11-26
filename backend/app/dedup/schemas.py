@@ -68,3 +68,5 @@ class ProposeMergeRequest(BaseModel):
         max_length=1000,
     )
     created_by: str = Field(default="dedup-agent", min_length=1, max_length=120)
+    connector_id: str | None = None
+    target_table: str | None = None

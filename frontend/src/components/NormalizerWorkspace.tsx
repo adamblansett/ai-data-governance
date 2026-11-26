@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { Check, Eye, Sparkles } from 'lucide-react';
-import { previewNormalizers, proposeNormalizers } from '../api/client';
+import { Check, Eye, Sparkles, Upload } from 'lucide-react';
+import { previewNormalizers, proposeNormalizers, uploadIngestFile } from '../api/client';
 import { SAMPLE_NORMALIZER_RECORDS, SAMPLE_NORMALIZER_RULES } from '../data/samples';
 import type { FieldRule, NormalizerPreviewResponse } from '../types/governance';
 
@@ -68,6 +68,20 @@ export default function NormalizerWorkspace({ onProposalCreated }: NormalizerWor
     }
   }
 
+  async function handleFileUpload(file: File | undefined) {
+    if (!file) return;
+    setError(null);
+    setLoading(true);
+    try {
+      const ingested = await uploadIngestFile(file);
+      setRecordsJson(JSON.stringify(ingested.records, null, 2));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'File upload failed');
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -81,16 +95,28 @@ export default function NormalizerWorkspace({ onProposalCreated }: NormalizerWor
               whitespace, and ISO dates non-destructively before staging for approval.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              setRecordsJson(JSON.stringify(SAMPLE_NORMALIZER_RECORDS, null, 2));
-              setRulesJson(JSON.stringify(SAMPLE_NORMALIZER_RULES, null, 2));
-            }}
-            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-          >
-            Load Sample
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setRecordsJson(JSON.stringify(SAMPLE_NORMALIZER_RECORDS, null, 2));
+                setRulesJson(JSON.stringify(SAMPLE_NORMALIZER_RULES, null, 2));
+              }}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Load Sample
+            </button>
+            <label className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
+              <Upload className="h-3.5 w-3.5" />
+              Upload CSV/JSON
+              <input
+                type="file"
+                accept=".csv,.json"
+                className="hidden"
+                onChange={(e) => void handleFileUpload(e.target.files?.[0])}
+              />
+            </label>
+          </div>
         </div>
 
         <div className="mt-4 grid gap-4 lg:grid-cols-2">

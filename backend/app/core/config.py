@@ -35,6 +35,16 @@ class Settings(BaseSettings):
 
     auth_secret_key: str = _DEFAULT_DEV_SECRET
     vault_encryption_key: str = ""
+    auth_required: bool = False
+    auth_token_ttl_minutes: int = 480
+    auth_api_keys: str = ""
+    enforce_four_eyes: bool = True
+
+    rate_limit_enabled: bool = True
+    rate_limit_requests_per_minute: int = 120
+    task_execution_mode: Literal["inline", "background"] = "inline"
+    redis_url: str = "redis://redis:6379/0"
+    otel_enabled: bool = False
 
     @property
     def cors_origin_list(self) -> list[str]:
@@ -72,5 +82,7 @@ def validate_production_security(settings: Settings) -> None:
         )
     if "*" in settings.cors_origin_list:
         errors.append("CORS_ORIGINS must not contain wildcard '*' in production.")
+    if not settings.auth_required:
+        errors.append("AUTH_REQUIRED must be true in production.")
     if errors:
         raise RuntimeError("Production security validation failed: " + " | ".join(errors))

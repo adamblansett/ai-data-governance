@@ -65,3 +65,5 @@ class NormalizerProposeRequest(BaseModel):
         max_length=200,
     )
     created_by: str = Field(default="normalizer-agent", min_length=1, max_length=120)
+    connector_id: str | None = None
+    target_table: str | None = None

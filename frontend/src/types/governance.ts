@@ -4,7 +4,26 @@ export type WorkspaceTab =
   | 'dedup'
   | 'normalizers'
   | 'schema_audit'
+  | 'connectors'
   | 'governance';
+
+export type Role = 'viewer' | 'analyst' | 'steward' | 'admin';
+
+export interface AuthTokenResponse {
+  access_token: string;
+  token_type: string;
+  sub: string;
+  role: Role;
+  expires_at: string;
+}
+
+export interface WhoAmIResponse {
+  sub: string;
+  role: Role;
+  auth_method: string;
+  auth_required: boolean;
+  permissions: string[];
+}
 
 export interface HealthStatus {
   status: string;
@@ -187,4 +206,83 @@ export interface AuditChainVerification {
   checked_count: number;
   broken_at_sequence: number | null;
   latest_hash: string | null;
+}
+
+export type ConnectorType = 'sqlite' | 'postgresql';
+
+export interface DataConnector {
+  id: string;
+  name: string;
+  connector_type: string;
+  dsn_masked: string;
+  read_only: boolean;
+  description: string;
+  created_by: string;
+  created_at: string;
+}
+
+export interface ConnectorTestResponse {
+  connector_id: string;
+  name: string;
+  connector_type: string;
+  ok: boolean;
+  dialect: string;
+  latency_ms: number;
+  table_count: number;
+  error: string | null;
+}
+
+export interface ConnectorTableMeta {
+  name: string;
+  row_count: number;
+  columns: { name: string; data_type: string; is_primary_key: boolean }[];
+  foreign_keys: { column: string; ref_table: string; ref_column: string; orphan_count: number }[];
+  indexes: { name: string; columns: string[]; unique: boolean }[];
+}
+
+export interface ConnectorSampleResponse {
+  connector_id: string;
+  table_name: string;
+  row_count_sampled: number;
+  columns: string[];
+  rows: Record<string, unknown>[];
+}
+
+export interface FileIngestResponse {
+  filename: string;
+  format: 'csv' | 'json';
+  row_count: number;
+  columns: string[];
+  records: Record<string, unknown>[];
+}
+
+export type JobType = 'pii_scan' | 'schema_audit' | 'dedup_analyze' | 'normalizer_preview';
+export type JobMode = 'inline' | 'background';
+
+export interface BackgroundJob {
+  id: string;
+  job_type: string;
+  status: string;
+  execution_mode: string;
+  created_by: string;
+  params: Record<string, unknown>;
+  result: Record<string, unknown> | null;
+  error_message: string | null;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+
+export interface ComplianceReport {
+  generated_at: string;
+  vault_total_tokens: number;
+  vault_by_entity_type: Record<string, number>;
+  proposals_total: number;
+  proposals_by_status: Record<string, number>;
+  proposals_by_domain: Record<string, number>;
+  connectors_total: number;
+  jobs_total: number;
+  jobs_by_status: Record<string, number>;
+  audit_chain: AuditChainVerification;
+  recent_audit_events: AuditEvent[];
 }

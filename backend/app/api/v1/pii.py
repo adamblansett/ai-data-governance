@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import Principal, require_role, resolve_actor
 from app.db.session import get_app_settings, get_db_session
 from app.pii.schemas import (
     PiiDetokenizeRequest,
@@ -30,6 +31,7 @@ def _get_vault(request: Request) -> PiiVault:
 @router.post("/scan", response_model=PiiScanResponse)
 async def scan_pii_endpoint(
     payload: PiiScanRequest,
+    _: Principal = Depends(require_role("analyst")),
     session: AsyncSession = Depends(get_db_session),
 ) -> PiiScanResponse:
     """Scan text or structured JSON records for PII entities."""
@@ -40,6 +42,7 @@ async def scan_pii_endpoint(
 async def mask_pii_endpoint(
     payload: PiiMaskRequest,
     request: Request,
+    _: Principal = Depends(require_role("analyst")),
     session: AsyncSession = Depends(get_db_session),
 ) -> PiiMaskResponse:
     """Apply redact, mask, hash, or reversible vault tokenization to PII."""
@@ -51,15 +54,17 @@ async def mask_pii_endpoint(
 async def detokenize_pii_endpoint(
     payload: PiiDetokenizeRequest,
     request: Request,
+    principal: Principal = Depends(require_role("steward")),
     session: AsyncSession = Depends(get_db_session),
 ) -> PiiDetokenizeResponse:
     """Resolve stored PII vault tokens with mandatory actor and reason audit logging."""
     vault = _get_vault(request)
+    actor = resolve_actor(principal, payload.actor)
     return await detokenize_pii(
         session,
         vault,
         tokens=payload.tokens,
-        actor=payload.actor,
+        actor=actor,
         reason=payload.reason,
     )
 
@@ -67,6 +72,7 @@ async def detokenize_pii_endpoint(
 @router.get("/vault/stats", response_model=PiiVaultStatsResponse)
 async def vault_stats_endpoint(
     request: Request,
+    _: Principal = Depends(require_role("viewer")),
     session: AsyncSession = Depends(get_db_session),
 ) -> PiiVaultStatsResponse:
     """Return aggregated counts of encrypted tokens stored in the PII vault."""

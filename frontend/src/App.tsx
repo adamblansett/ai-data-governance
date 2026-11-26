@@ -5,15 +5,20 @@ import {
   GitMerge,
   KeyRound,
   LayoutDashboard,
+  PlugZap,
   ShieldCheck,
   Sparkles,
+  UserCheck,
 } from 'lucide-react';
 import {
   fetchHealth,
   fetchProposals,
   fetchVaultStats,
+  issueAuthToken,
+  setAuthToken,
   verifyAuditChain,
 } from './api/client';
+import ConnectorsWorkspace from './components/ConnectorsWorkspace';
 import DedupWorkspace from './components/DedupWorkspace';
 import GovernancePanel from './components/GovernancePanel';
 import NormalizerWorkspace from './components/NormalizerWorkspace';
@@ -25,6 +30,7 @@ import type {
   GovernanceProposal,
   HealthStatus,
   PiiVaultStatsResponse,
+  Role,
   WorkspaceTab,
 } from './types/governance';
 
@@ -34,6 +40,7 @@ const NAV_TABS: { id: WorkspaceTab; label: string; icon: typeof LayoutDashboard 
   { id: 'dedup', label: 'Duplicate Merge', icon: GitMerge },
   { id: 'normalizers', label: 'Normalizers', icon: Sparkles },
   { id: 'schema_audit', label: 'Schema Audit', icon: Database },
+  { id: 'connectors', label: 'Connectors & Jobs', icon: PlugZap },
   { id: 'governance', label: 'Approvals & Audit', icon: ShieldCheck },
 ];
 
@@ -41,6 +48,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('overview');
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [offline, setOffline] = useState(false);
+  const [sessionRole, setSessionRole] = useState<'default' | Role>('default');
   const [vaultStats, setVaultStats] = useState<PiiVaultStatsResponse | null>(null);
   const [proposals, setProposals] = useState<GovernanceProposal[]>([]);
   const [auditVerification, setAuditVerification] =
@@ -96,6 +104,25 @@ export default function App() {
     };
   }, [refreshSummary]);
 
+  async function handleRoleChange(nextRole: 'default' | Role) {
+    setSessionRole(nextRole);
+    if (nextRole === 'default') {
+      setAuthToken(null);
+      return;
+    }
+    try {
+      const issued = await issueAuthToken({
+        username: `ui-${nextRole}`,
+        role: nextRole,
+      });
+      setAuthToken(issued.access_token);
+      setToast(`Switched JWT session to ${issued.sub} (${issued.role})`);
+      void refreshSummary();
+    } catch (err) {
+      setToast(err instanceof Error ? err.message : 'Unable to switch role token');
+    }
+  }
+
   function handleProposalCreated(message: string) {
     setToast(message);
     void refreshSummary();
@@ -119,23 +146,42 @@ export default function App() {
               masking, duplicate record merging, database normalization, and schema hygiene.
             </p>
           </div>
-          <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3.5 py-1.5 text-xs font-medium">
-            <Activity
-              className={`h-3.5 w-3.5 ${
-                health?.status === 'ok'
-                  ? 'text-emerald-600'
+          <div className="flex flex-wrap items-center gap-2.5">
+            <label className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-medium text-slate-700">
+              <UserCheck className="h-3.5 w-3.5 text-indigo-600" />
+              <span className="sr-only">Session Role</span>
+              <select
+                aria-label="Session Role"
+                value={sessionRole}
+                onChange={(e) => void handleRoleChange(e.target.value as 'default' | Role)}
+                className="bg-transparent text-xs font-semibold text-slate-800 focus:outline-none"
+              >
+                <option value="default">Role: Dev Default</option>
+                <option value="viewer">Role: Viewer (JWT)</option>
+                <option value="analyst">Role: Analyst (JWT)</option>
+                <option value="steward">Role: Steward (JWT)</option>
+                <option value="admin">Role: Admin (JWT)</option>
+              </select>
+            </label>
+
+            <div className="flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3.5 py-1.5 text-xs font-medium">
+              <Activity
+                className={`h-3.5 w-3.5 ${
+                  health?.status === 'ok'
+                    ? 'text-emerald-600'
+                    : offline
+                    ? 'text-amber-600'
+                    : 'text-slate-400'
+                }`}
+              />
+              <span>
+                {health?.status === 'ok'
+                  ? `API Healthy (${health.llm_provider})`
                   : offline
-                  ? 'text-amber-600'
-                  : 'text-slate-400'
-              }`}
-            />
-            <span>
-              {health?.status === 'ok'
-                ? `API Healthy (${health.llm_provider})`
-                : offline
-                ? 'Offline Starter Preview'
-                : 'Checking API...'}
-            </span>
+                  ? 'Offline Starter Preview'
+                  : 'Checking API...'}
+              </span>
+            </div>
           </div>
         </div>
 
@@ -224,6 +270,8 @@ export default function App() {
         {activeTab === 'schema_audit' && (
           <SchemaAuditWorkspace onProposalCreated={handleProposalCreated} />
         )}
+
+        {activeTab === 'connectors' && <ConnectorsWorkspace />}
 
         {activeTab === 'governance' && (
           <GovernancePanel onDataChanged={() => void refreshSummary()} />
